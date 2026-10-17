@@ -47,6 +47,8 @@ namespace luabind {
 					return;
 
 				nurse->add_dependency(L, meta::get<meta::index_list<StackIndices...>, B>::value);
+				// GlobalWar (lua_wrapper_nogc): the dependency table is released by __gc
+				restore_instance_finalizer(L, meta::get<meta::index_list<StackIndices...>, A>::value);
 			}
 		};
 
@@ -63,6 +65,8 @@ namespace luabind {
 					return;
 
 				nurse->add_dependency(L, meta::get<meta::index_list<StackIndices...>, B>::value);
+				// GlobalWar (lua_wrapper_nogc): the dependency table is released by __gc
+				restore_instance_finalizer(L, meta::get<meta::index_list<StackIndices...>, 0>::value + results);
 			}
 		};
 
@@ -79,6 +83,8 @@ namespace luabind {
 					return;
 
 				nurse->add_dependency(L, meta::get<meta::index_list<StackIndices...>, 0>::value + results);
+				// GlobalWar (lua_wrapper_nogc): the dependency table is released by __gc
+				restore_instance_finalizer(L, meta::get<meta::index_list<StackIndices...>, A>::value);
 			}
 		};
 

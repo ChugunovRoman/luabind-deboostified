@@ -72,12 +72,27 @@ namespace luabind {
 				throw unresolved_name("Trying to use unregistered class", typeid(P).name());
 			}
 
-			object_rep* instance = push_new_instance(L, cls);
-
 			using value_type = typename std::remove_reference<P>::type;
 			using holder_type = pointer_holder<value_type>;
 
-			void* storage = instance->allocate(sizeof(holder_type));
+			// GlobalWar (lua_wrapper_nogc, object_rep.hpp set_nonowning_instance_nogc): a raw pointer owns nothing,
+			// such an instance may be made without __gc (its holder then lives in the userdata). Smart pointers
+			// (unique_ptr of adopt, shared_ptr...) own the object: always with __gc, as before.
+			constexpr bool non_owning = std::is_pointer<value_type>::value
+				&& std::is_trivially_destructible<value_type>::value
+				&& alignof(holder_type) <= alignof(object_rep);
+
+			object_rep* instance;
+			void* storage;
+			if constexpr(non_owning)
+			{
+				instance = push_new_pointer_instance(L, cls, sizeof(holder_type), storage);
+			}
+			else
+			{
+				instance = push_new_instance(L, cls);
+				storage = instance->allocate(sizeof(holder_type));
+			}
 
 			try
 			{

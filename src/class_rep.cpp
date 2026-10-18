@@ -129,7 +129,17 @@ int luabind::detail::class_rep::constructor_dispatcher(lua_State* L)
 
 	int args = lua_gettop(L);
 
-	push_new_instance(L, cls);
+	// GlobalWar (47-luabind-value-nogc.md): a C++ class whose constructors keep the value in the userdata (construct,
+	// value_construct_nogc) gets its instance without __gc
+	if(cls->value_nogc_construct())
+	{
+		void* unused_storage;
+		push_new_value_instance(L, cls, 0, unused_storage);
+	}
+	else
+	{
+		push_new_instance(L, cls);
+	}
 
 	if(super_deprecation_disabled
 		&& cls->get_class_type() == class_rep::lua_class

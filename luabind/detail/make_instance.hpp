@@ -154,12 +154,27 @@ namespace luabind {
 				throw unresolved_name("Trying to use unregistered class: ", typeid(ValueType).name());
 			}
 
-			object_rep* instance = push_new_instance(L, cls);
-
 			using value_type = typename std::remove_reference<ValueType>::type;
 			using holder_type = value_holder<value_type>;
 
-			void* storage = instance->allocate(sizeof(holder_type));
+			// GlobalWar (47-luabind-value-nogc.md, object_rep.hpp set_value_instance_nogc): a copy of a trivially
+			// destructible value needs no destructor, such an instance may be made without __gc (the holder then lives
+			// in the userdata). Values with a destructor (strings, containers...): always with __gc, as before.
+			constexpr bool trivial_value = std::is_trivially_destructible<value_type>::value
+				&& alignof(holder_type) <= alignof(void*)
+				&& alignof(holder_type) <= alignof(object_rep);
+
+			object_rep* instance;
+			void* storage;
+			if constexpr(trivial_value)
+			{
+				instance = push_new_value_instance(L, cls, sizeof(holder_type), storage);
+			}
+			else
+			{
+				instance = push_new_instance(L, cls);
+				storage = instance->allocate(sizeof(holder_type));
+			}
 
 			try {
 				new (storage) holder_type(L, std::forward<ValueType>(val));

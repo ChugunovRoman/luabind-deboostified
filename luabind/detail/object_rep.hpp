@@ -178,6 +178,27 @@ namespace luabind {
 		// GlobalWar: the instance at index gets back the instance metatable with __gc if it was made without one. For
 		// dependency_policy: the dependency table of an object_rep is released by its __gc (~lua_reference).
 		LUABIND_API void restore_instance_finalizer(lua_State* L, int index);
+
+		// GlobalWar (plans/optimization_mt/47-luabind-value-nogc.md, xrGame cvar lua_value_nogc): instances that hold a
+		// copy of a C++ value (value_holder<T>: vector, CTime, Fmatrix... returned by value, out_value, copy, a
+		// constructor called from Lua) whose type is trivially destructible need no destructor - their __gc only runs an
+		// empty holder destructor (and frees a holder over 32 bytes). On, they are made like the non-owning ones above:
+		// the holder inside the userdata, the twin of the instance metatable without __gc. make_value_instance and
+		// construct check the type at compile time (std::is_trivially_destructible, the alignment); construct also
+		// needs the default holder (unique_ptr) and no wrap_base. Off (default): as before. Only the instances made after
+		// the switch are affected; any thread (atomic).
+		LUABIND_API void set_value_instance_nogc(bool enable);
+		// GlobalWar: how many value instances were made without __gc since the start (a running total for the metrics)
+		LUABIND_API std::uint64_t value_instance_nogc_created();
+		// GlobalWar: push_new_instance for make_value_instance (and constructor_dispatcher, holder_size 0) of a trivially
+		// destructible value. storage receives where to construct a holder of holder_size bytes (inside the userdata
+		// when made without __gc; object_rep::allocate otherwise).
+		LUABIND_API object_rep* push_new_value_instance(lua_State* L, class_rep* cls, std::size_t holder_size, void*& storage);
+		// GlobalWar: for construct<T> of a trivially destructible T: true if the instance at index (being constructed)
+		// was made without __gc - then the value must be kept in the instance (value_holder, nothing to free). Otherwise
+		// false; and if the switch is on and the instance is of the C++ class of type itself, its class_rep gets
+		// value_nogc_construct(): the next instances are made without __gc.
+		LUABIND_API bool value_construct_nogc(lua_State* L, int index, type_id const& type);
 		// GlobalWar: integer keys (key 1 is the instance tag, see get_instance): the instance metatable keeps its twin
 		// without __gc (made with the first instance without __gc in the Lua state), the twin keeps the instance metatable
 		constexpr int instance_metatable_nogc_twin_key = 2;

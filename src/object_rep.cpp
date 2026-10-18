@@ -381,6 +381,34 @@ namespace luabind {
 			return g_nonowning_nogc_created.load(std::memory_order_relaxed);
 		}
 
+		namespace {
+			// GlobalWar: push_new_instance without __gc (push_new_pointer_instance, push_new_value_instance). storage
+			// receives where to construct a holder of holder_size bytes: m_instance_buffer when it fits (32 bytes), else
+			// right after the object_rep in the userdata itself. created counts the instance (a running total).
+			object_rep* push_nogc_instance(lua_State* L, class_rep* cls, std::size_t holder_size, void*& storage,
+				std::atomic<std::uint64_t>& created)
+			{
+				const bool trailing = holder_size > inline_holder_size;
+				void* mem = lua_newuserdata(L, sizeof(object_rep) + (trailing ? holder_size : 0));
+				object_rep* result = new (mem) object_rep(0, cls);
+				cls->get_table(L);
+				lua_setuservalue(L, -2);
+				lua_rawgeti(L, LUA_REGISTRYINDEX, cls->metatable_ref());
+				replace_with_nogc_twin(L);
+				lua_setmetatable(L, -2);
+				storage = trailing ? result->use_trailing_storage() : result->allocate(holder_size);
+				// Lua runs on one thread at a time: no read-modify-write needed
+				created.store(created.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+				if(const instance_create_hook hook = g_instance_create_hook.load(std::memory_order_acquire))
+					hook(L, cls);
+				return result;
+			}
+
+			// GlobalWar: see set_value_instance_nogc (object_rep.hpp)
+			std::atomic<bool> g_value_nogc{ false };
+			std::atomic<std::uint64_t> g_value_nogc_created{ 0 };
+		}
+
 		LUABIND_API object_rep* push_new_pointer_instance(lua_State* L, class_rep* cls, std::size_t holder_size, void*& storage)
 		{
 			// A Lua class may have __finalize (destroy_instance calls it): only C++ classes
@@ -390,21 +418,50 @@ namespace luabind {
 				storage = result->allocate(holder_size);
 				return result;
 			}
+			return push_nogc_instance(L, cls, holder_size, storage, g_nonowning_nogc_created);
+		}
 
-			const bool trailing = holder_size > inline_holder_size;
-			void* mem = lua_newuserdata(L, sizeof(object_rep) + (trailing ? holder_size : 0));
-			object_rep* result = new (mem) object_rep(0, cls);
-			cls->get_table(L);
-			lua_setuservalue(L, -2);
-			lua_rawgeti(L, LUA_REGISTRYINDEX, cls->metatable_ref());
-			replace_with_nogc_twin(L);
-			lua_setmetatable(L, -2);
-			storage = trailing ? result->use_trailing_storage() : result->allocate(holder_size);
-			// Lua runs on one thread at a time: no read-modify-write needed
-			g_nonowning_nogc_created.store(g_nonowning_nogc_created.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
-			if(const instance_create_hook hook = g_instance_create_hook.load(std::memory_order_acquire))
-				hook(L, cls);
-			return result;
+		LUABIND_API void set_value_instance_nogc(bool enable)
+		{
+			g_value_nogc.store(enable, std::memory_order_relaxed);
+		}
+
+		LUABIND_API std::uint64_t value_instance_nogc_created()
+		{
+			return g_value_nogc_created.load(std::memory_order_relaxed);
+		}
+
+		LUABIND_API object_rep* push_new_value_instance(lua_State* L, class_rep* cls, std::size_t holder_size, void*& storage)
+		{
+			// A Lua class may have __finalize (destroy_instance calls it): only C++ classes
+			if(!g_value_nogc.load(std::memory_order_relaxed) || cls->get_class_type() != class_rep::cpp_class)
+			{
+				object_rep* result = push_new_instance(L, cls);
+				storage = result->allocate(holder_size);
+				return result;
+			}
+			return push_nogc_instance(L, cls, holder_size, storage, g_value_nogc_created);
+		}
+
+		LUABIND_API bool value_construct_nogc(lua_State* L, int index, type_id const& type)
+		{
+			object_rep* const self = static_cast<object_rep*>(lua_touserdata(L, index));
+			if(!self || !lua_getmetatable(L, index))
+				return false;
+			lua_rawgeti(L, -1, gc_original_key);
+			const bool nogc = lua_istable(L, -1);
+			lua_pop(L, 2);
+			if(nogc)
+				return true;
+			// The instance of exactly this C++ class (not of a Lua class derived from it, not of a C++ class that has
+			// this constructor from its base): the next ones are made without __gc (class_rep::constructor_dispatcher)
+			class_rep* const cls = self->crep();
+			if(g_value_nogc.load(std::memory_order_relaxed) && cls && !cls->value_nogc_construct()
+				&& cls->get_class_type() == class_rep::cpp_class && cls->type() == type)
+			{
+				cls->set_value_nogc_construct();
+			}
+			return false;
 		}
 
 		LUABIND_API void restore_instance_finalizer(lua_State* L, int index)

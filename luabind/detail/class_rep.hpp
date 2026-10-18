@@ -123,6 +123,12 @@ namespace luabind {
 
 			class_type get_class_type() const { return m_class_type; }
 
+			// GlobalWar (plans/optimization_mt/47-luabind-value-nogc.md): the constructors of this C++ class keep the
+			// value in the userdata (construct, value_construct_nogc in object_rep.hpp): constructor_dispatcher makes
+			// its instances without __gc. Set by the first such constructor called from Lua.
+			bool value_nogc_construct() const { return m_value_nogc_construct; }
+			void set_value_nogc_construct() { m_value_nogc_construct = true; }
+
 			void add_static_constant(const char* name, int val);
 
 			static int super_callback(lua_State* L);
@@ -206,6 +212,9 @@ namespace luabind {
 
 			cast_graph* m_casts;
 			class_id_map* m_classes;
+
+			// GlobalWar: see value_nogc_construct()
+			bool m_value_nogc_construct = false;
 		};
 
 		LUABIND_API bool is_class_rep(lua_State* L, int index);

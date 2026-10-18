@@ -9,6 +9,7 @@
 # include <luabind/pointer_traits.hpp>
 # include <luabind/typeid.hpp>
 # include <stdexcept>
+# include <utility>
 
 namespace luabind {
 	namespace detail {
@@ -89,6 +90,12 @@ namespace luabind {
 			// No need for dynamic_id / dynamic_ptr, since we always get the most derived type
 			value_holder(lua_State* /*L*/, ValueType val)
 				: instance_holder(false), val_(std::move(val))
+			{}
+
+			// GlobalWar (47-luabind-value-nogc.md, construct): the value made in place, like luabind_new<T>(args...)
+			template <class... Args>
+			value_holder(lua_State* /*L*/, std::in_place_t, Args&&... args)
+				: instance_holder(false), val_(std::forward<Args>(args)...)
 			{}
 
 			explicit operator bool() const
